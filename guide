@@ -1,0 +1,2 @@
+clang-format -i main.c
+clang-tidy --fix --fix-errors '--header-filter=.*'  '--checks=readability-braces-around-statements,misc-macro-parentheses' main.c -- -I. -I../deps/noise -I../deps/tinycthread
