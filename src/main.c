@@ -1,3 +1,13 @@
+#include <GL/glew.h>
+#include <GLFW/glfw3.h>
+#include <curl/curl.h>
+#include <math.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
 #include "auth.h"
 #include "client.h"
 #include "config.h"
@@ -11,14 +21,6 @@
 #include "tinycthread.h"
 #include "util.h"
 #include "world.h"
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
-#include <curl/curl.h>
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
 
 #define MAX_CHUNKS 8192
 #define MAX_PLAYERS 128
@@ -134,7 +136,7 @@ typedef struct {
 	int height;
 	int observe1;
 	int observe2;
-	int flying;
+	int gait;
 	int item_index;
 	int scale;
 	int ortho;
@@ -152,6 +154,8 @@ typedef struct {
 	Block copy0;
 	Block copy1;
 } Model;
+
+enum gait { CLIMB, CRAWL, EDGE, FLY, JOG, RUN, SWIM, WALK };
 
 static Model model;
 static Model *g = &model;
@@ -212,8 +216,7 @@ get_sight_vector(float rx, float ry, float *vx, float *vy, float *vz)
 
 void
 get_motion_vector(
-		int flying, int sz, int sx, float rx, float ry, float *vx, float *vy,
-		float *vz)
+		int sz, int sx, float rx, float ry, float *vx, float *vy, float *vz)
 {
 	*vx = 0;
 	*vy = 0;
@@ -221,10 +224,14 @@ get_motion_vector(
 	if (!sz && !sx) {
 		return;
 	}
+
 	float strafe = atan2f(sz, sx);
-	if (flying) {
-		float m = cosf(ry);
-		float y = sinf(ry);
+	float m, y;
+
+	switch (g->gait) {
+	case FLY:
+		m = cosf(ry);
+		y = sinf(ry);
 		if (sx) {
 			if (!sz) {
 				y = 0;
@@ -237,7 +244,8 @@ get_motion_vector(
 		*vx = cosf(rx + strafe) * m;
 		*vy = y;
 		*vz = sinf(rx + strafe) * m;
-	} else {
+		break;
+	default:
 		*vx = cosf(rx + strafe);
 		*vy = 0;
 		*vz = sinf(rx + strafe);
@@ -2340,9 +2348,18 @@ on_key(GLFWwindow *window, int key, int scancode, int action, int mods)
 	int control = mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER);
 	int exclusive =
 			glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
+
 	if (action == GLFW_RELEASE) {
+		switch (key) {
+		case CRAFT_KEY_FORWARD:
+			if (g->gait == JOG || g->gait == RUN) {
+				g->gait = WALK;
+			}
+			break;
+		}
 		return;
 	}
+
 	if (key == GLFW_KEY_BACKSPACE) {
 		if (g->typing) {
 			int n = strlen(g->typing_buffer);
@@ -2401,10 +2418,45 @@ on_key(GLFWwindow *window, int key, int scancode, int action, int mods)
 			parse_command(buffer, 0);
 		}
 	}
+
+	if ((key == CRAFT_KEY_RUN) &&
+		(glfwGetKey(window, CRAFT_KEY_FORWARD) == GLFW_PRESS)) {
+		switch (g->gait) {
+		case EDGE:
+			g->gait = WALK;
+			break;
+		case JOG:
+			g->gait = RUN;
+			break;
+		case RUN:
+			g->gait = JOG;
+			break;
+		case WALK:
+			g->gait = JOG;
+			break;
+		}
+	}
+
 	if (!g->typing) {
 		if (key == CRAFT_KEY_FLY) {
-			g->flying = !g->flying;
+			if (g->gait == FLY) {
+				g->gait = WALK;
+			} else {
+				g->gait = FLY;
+			}
 		}
+
+		if (key == CRAFT_KEY_EDGE) {
+			switch (g->gait) {
+			case EDGE:
+				g->gait = WALK;
+				break;
+			case WALK:
+				g->gait = EDGE;
+				break;
+			}
+		}
+
 		if (key >= '1' && key <= '9') {
 			g->item_index = key - '1';
 		}
@@ -2574,10 +2626,12 @@ handle_movement(double dt)
 	State *s = &g->players->state;
 	int sz = 0;
 	int sx = 0;
+
 	if (!g->typing) {
 		float m = dt * 1.0;
 		g->ortho = glfwGetKey(g->window, CRAFT_KEY_ORTHO) ? 64 : 0;
 		g->fov = glfwGetKey(g->window, CRAFT_KEY_ZOOM) ? 15 : 65;
+
 		if (glfwGetKey(g->window, CRAFT_KEY_FORWARD)) {
 			sz--;
 		}
@@ -2603,18 +2657,52 @@ handle_movement(double dt)
 			s->ry -= m;
 		}
 	}
+
 	float vx, vy, vz;
-	get_motion_vector(g->flying, sz, sx, s->rx, s->ry, &vx, &vy, &vz);
+
+	get_motion_vector(sz, sx, s->rx, s->ry, &vx, &vy, &vz);
+
 	if (!g->typing) {
 		if (glfwGetKey(g->window, CRAFT_KEY_JUMP)) {
-			if (g->flying) {
+			if (g->gait == FLY) {
 				vy = 1;
 			} else if (dy == 0) {
 				dy = 8;
 			}
 		}
 	}
-	float speed = g->flying ? 20 : 5;
+
+	/* FIXME: Should floats be doubles instead? */
+	float speed;
+	switch (g->gait) {
+	case CLIMB:
+		speed = 3;
+		break;
+	case CRAWL:
+		speed = 1;
+		break;
+	case EDGE:
+		speed = 2;
+		break;
+	case FLY:
+		speed = 20;
+		break;
+	case JOG:
+		speed = 6.5;
+		break;
+	case RUN:
+		speed = 8;
+		break;
+	case SWIM:
+		speed = 3;
+		break;
+	case WALK:
+		speed = 5;
+		break;
+	default:
+		speed = 5;
+	}
+
 	int estimate = roundf(
 			sqrtf(powf(vx * speed, 2) + powf(vy * speed + ABS(dy) * 2, 2) +
 				  powf(vz * speed, 2)) *
@@ -2625,7 +2713,7 @@ handle_movement(double dt)
 	vy = vy * ut * speed;
 	vz = vz * ut * speed;
 	for (int i = 0; i < step; i++) {
-		if (g->flying) {
+		if (g->gait == FLY) {
 			dy = 0;
 		} else {
 			dy -= ut * 25;
@@ -2748,7 +2836,7 @@ reset_model()
 	g->player_count = 0;
 	g->observe1 = 0;
 	g->observe2 = 0;
-	g->flying = 0;
+	g->gait = WALK;
 	g->item_index = 0;
 	memset(g->typing_buffer, 0, sizeof(char) * MAX_TEXT_LENGTH);
 	g->typing = 0;
