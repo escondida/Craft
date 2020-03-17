@@ -1,3 +1,31 @@
+## Incompatible and breaking changes
+
+This branch is forked from the [main craft repository][mainrepo]. So
+far, the only notable gameplay change is adding in different movement
+speeds:
+
+[mainrepo]: https://github.com/fogleman/Craft
+
+- Hit left shift to toggle edging along. At the moment, this does not
+prevent falling over edges.
+- While moving forward, every press of left control will change your
+speed: (crawl ->) walk -> jog -> run -> jog -> run, etc. If you stop
+moving forward while running, you revert to normal walking speed.
+
+I've removed the bundled glew, glfw, and sqlite: these should be
+installed on the host system anyway. Furthermore, I've removed cmake
+in favor of plan9 mk: it's much simpler, and having object files lying
+around makes it much quicker to test changes to a single file.
+
+Finally--and only because upstream seems to have been inactive for
+several years, so there's little chance of pushing changes
+upstream--I've been running modified files through clang-format to
+munge them more or less into K&R style (or 1TBS, technically, I
+suppose). If it seems likely that upstream wants patches from this
+branch, I'll tweak the patches to work with the original formatting.
+If you want to submit any work to this fork, kindly run it through the
+clang-format invocation found in "guide".
+
 ## Craft
 
 Minecraft clone for Windows, Mac OS X and Linux. Just a few thousand lines of C using modern OpenGL (shaders). Online multiplayer support is included using a Python-based server.
