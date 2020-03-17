@@ -2578,22 +2578,30 @@ handle_movement(double dt)
 		float m = dt * 1.0;
 		g->ortho = glfwGetKey(g->window, CRAFT_KEY_ORTHO) ? 64 : 0;
 		g->fov = glfwGetKey(g->window, CRAFT_KEY_ZOOM) ? 15 : 65;
-		if (glfwGetKey(g->window, CRAFT_KEY_FORWARD))
+		if (glfwGetKey(g->window, CRAFT_KEY_FORWARD)) {
 			sz--;
-		if (glfwGetKey(g->window, CRAFT_KEY_BACKWARD))
+		}
+		if (glfwGetKey(g->window, CRAFT_KEY_BACKWARD)) {
 			sz++;
-		if (glfwGetKey(g->window, CRAFT_KEY_LEFT))
+		}
+		if (glfwGetKey(g->window, CRAFT_KEY_LEFT)) {
 			sx--;
-		if (glfwGetKey(g->window, CRAFT_KEY_RIGHT))
+		}
+		if (glfwGetKey(g->window, CRAFT_KEY_RIGHT)) {
 			sx++;
-		if (glfwGetKey(g->window, GLFW_KEY_LEFT))
+		}
+		if (glfwGetKey(g->window, GLFW_KEY_LEFT)) {
 			s->rx -= m;
-		if (glfwGetKey(g->window, GLFW_KEY_RIGHT))
+		}
+		if (glfwGetKey(g->window, GLFW_KEY_RIGHT)) {
 			s->rx += m;
-		if (glfwGetKey(g->window, GLFW_KEY_UP))
+		}
+		if (glfwGetKey(g->window, GLFW_KEY_UP)) {
 			s->ry += m;
-		if (glfwGetKey(g->window, GLFW_KEY_DOWN))
+		}
+		if (glfwGetKey(g->window, GLFW_KEY_DOWN)) {
 			s->ry -= m;
+		}
 	}
 	float vx, vy, vz;
 	get_motion_vector(g->flying, sz, sx, s->rx, s->ry, &vx, &vy, &vz);
