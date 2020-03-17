@@ -1,0 +1,42 @@
+MKSHELL = rc
+
+TARGS = craft
+
+<../config.mk
+
+OBJS=auth.o \
+	client.o \
+	cube.o \
+	db.o \
+	item.o \
+	lodepng.o \
+	main.o \
+	map.o \
+	matrix.o \
+	noise.o \
+	ring.o \
+	sign.o \
+	tinycthread.o \
+	util.o \
+	world.o
+
+craft:Q: $OBJS
+	echo $CC -o $target $prereq
+	$CC $CFLAGS $LDFLAGS -o $target $prereq
+
+auth.o: auth.h
+client.o: client.h tinycthread.h
+cube.o: cube.h item.h matrix.h util.h
+db.o: db.h ring.h sign.h tinycthread.h
+item.o: item.h util.h
+main.o: auth.h client.h config.h cube.h db.h item.h map.h matrix.h noise.h sign.h tinycthread.h util.h world.h
+map.o: map.h
+matrix.o: config.h util.h
+ring.o: ring.h
+sign.o: sign.h
+tinycthread.o: tinycthread.h
+util.o: config.h lodepng.h matrix.h util.h
+world.o: config.h world.h
+
+clean:V:
+	rm -f craft *.o
