@@ -4,11 +4,11 @@ TARGS = craft
 
 <config.mk
 
-craft: src
-	install src/$target $target
+craft: src/game
+	install $prereq $target
 
-src:V:
+src/game:
 	cd src; mk; cd ..
 
 clean:V:
-	rm -f craft src/craft src/*.o
+	rm -f craft src/game src/*.o

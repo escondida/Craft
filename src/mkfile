@@ -1,6 +1,6 @@
 MKSHELL = rc
 
-TARGS = craft
+TARGS = game
 
 <../config.mk
 
@@ -22,7 +22,7 @@ OBJS=auth.o \
 	util.o \
 	world.o
 
-craft:Q: $OBJS
+game:Q: $OBJS
 	echo $CC -o $target $prereq
 	$CC $CFLAGS $LDFLAGS -o $target $prereq
 
@@ -43,4 +43,4 @@ util.o: config.h lodepng.h matrix.h util.h
 world.o: config.h world.h
 
 clean:V:
-	rm -f craft *.o
+	rm -f game *.o
