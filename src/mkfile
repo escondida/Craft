@@ -35,7 +35,7 @@ item.o: item.h util.h
 main.o: auth.h client.h config.h cube.h db.h item.h map.h matrix.h noise.h sign.h tinycthread.h util.h world.h
 map.o: map.h
 matrix.o: config.h util.h
-model.o: model.h player.h
+model.o: cube.h map.h model.h player.h sign.h tinycthread.h util.h
 ring.o: ring.h
 sign.o: sign.h
 tinycthread.o: tinycthread.h
