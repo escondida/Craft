@@ -8,11 +8,13 @@ OBJS=auth.o \
 	client.o \
 	cube.o \
 	db.o \
+	gametime.o \
 	item.o \
 	lodepng.o \
 	main.o \
 	map.o \
 	matrix.o \
+	model.o \
 	noise.o \
 	ring.o \
 	sign.o \
@@ -28,10 +30,12 @@ auth.o: auth.h
 client.o: client.h tinycthread.h
 cube.o: cube.h item.h matrix.h util.h
 db.o: db.h ring.h sign.h tinycthread.h
+gametime.o: gametime.h
 item.o: item.h util.h
 main.o: auth.h client.h config.h cube.h db.h item.h map.h matrix.h noise.h sign.h tinycthread.h util.h world.h
 map.o: map.h
 matrix.o: config.h util.h
+model.o: model.h player.h
 ring.o: ring.h
 sign.o: sign.h
 tinycthread.o: tinycthread.h

@@ -1,17 +1,3 @@
-#include "auth.h"
-#include "client.h"
-#include "config.h"
-#include "cube.h"
-#include "db.h"
-#include "item.h"
-#include "map.h"
-#include "matrix.h"
-#include "noise.h"
-#include "sign.h"
-#include "tinycthread.h"
-#include "util.h"
-#include "world.h"
-
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <curl/curl.h>
@@ -22,197 +8,31 @@
 #include <string.h>
 #include <time.h>
 
-#define MAX_CHUNKS 8192
-#define MAX_PLAYERS 128
-#define WORKERS 4
-#define MAX_TEXT_LENGTH 256
-#define MAX_NAME_LENGTH 32
-#define MAX_PATH_LENGTH 256
-#define MAX_ADDR_LENGTH 256
+// clang-format off
+#include "noise.h"
+#include "tinycthread.h"
+// clang-format on
 
-#define ALIGN_LEFT 0
-#define ALIGN_CENTER 1
-#define ALIGN_RIGHT 2
+#include "auth.h"
+#include "client.h"
+#include "config.h"
+#include "cube.h"
+#include "db.h"
+#include "gametime.h"
+#include "item.h"
+#include "map.h"
+#include "matrix.h"
+#include "player.h"
+#include "sign.h"
+#include "util.h"
+#include "world.h"
 
-#define MODE_OFFLINE 0
-#define MODE_ONLINE 1
-
-#define WORKER_IDLE 0
-#define WORKER_BUSY 1
-#define WORKER_DONE 2
-
-typedef struct {
-	Map map;
-	Map lights;
-	SignList signs;
-	int p;
-	int q;
-	int faces;
-	int sign_faces;
-	int dirty;
-	int miny;
-	int maxy;
-	GLuint buffer;
-	GLuint sign_buffer;
-} Chunk;
-
-typedef struct {
-	int p;
-	int q;
-	int load;
-	Map *block_maps[3][3];
-	Map *light_maps[3][3];
-	int miny;
-	int maxy;
-	int faces;
-	GLfloat *data;
-} WorkerItem;
-
-typedef struct {
-	int index;
-	int state;
-	thrd_t thrd;
-	mtx_t mtx;
-	cnd_t cnd;
-	WorkerItem item;
-} Worker;
-
-typedef struct {
-	int x;
-	int y;
-	int z;
-	int w;
-} Block;
-
-typedef struct {
-	float x;
-	float y;
-	float z;
-	float rx;
-	float ry;
-	float t;
-} State;
-
-typedef struct {
-	int id;
-	char name[MAX_NAME_LENGTH];
-	State state;
-	State state1;
-	State state2;
-	GLuint buffer;
-} Player;
-
-typedef struct {
-	GLuint program;
-	GLuint position;
-	GLuint normal;
-	GLuint uv;
-	GLuint matrix;
-	GLuint sampler;
-	GLuint camera;
-	GLuint timer;
-	GLuint extra1;
-	GLuint extra2;
-	GLuint extra3;
-	GLuint extra4;
-} Attrib;
-
-typedef struct {
-	GLFWwindow *window;
-	Worker workers[WORKERS];
-	Chunk chunks[MAX_CHUNKS];
-	int chunk_count;
-	int create_radius;
-	int render_radius;
-	int delete_radius;
-	int sign_radius;
-	Player players[MAX_PLAYERS];
-	int player_count;
-	int typing;
-	char typing_buffer[MAX_TEXT_LENGTH];
-	int message_index;
-	char messages[MAX_MESSAGES][MAX_TEXT_LENGTH];
-	int width;
-	int height;
-	int observe1;
-	int observe2;
-	int gait;
-	int item_index;
-	int scale;
-	int ortho;
-	float fov;
-	int suppress_char;
-	int mode;
-	int mode_changed;
-	char db_path[MAX_PATH_LENGTH];
-	char server_addr[MAX_ADDR_LENGTH];
-	int server_port;
-	int day_length;
-	int time_changed;
-	Block block0;
-	Block block1;
-	Block copy0;
-	Block copy1;
-} Model;
-
-enum gait { CLIMB, CRAWL, EDGE, FLY, JOG, RUN, SWIM, WALK };
+// clang-format off
+#include "model.h"
+// clang-format on
 
 static Model model;
 static Model *g = &model;
-
-int
-chunked(float x)
-{
-	return floorf(roundf(x) / CHUNK_SIZE);
-}
-
-float
-time_of_day()
-{
-	if (g->day_length <= 0) {
-		return 0.5;
-	}
-	float t;
-	t = glfwGetTime();
-	t = t / g->day_length;
-	t = t - (int)t;
-	return t;
-}
-
-float
-get_daylight()
-{
-	float timer = time_of_day();
-	if (timer < 0.5) {
-		float t = (timer - 0.25) * 100;
-		return 1 / (1 + powf(2, -t));
-	} else {
-		float t = (timer - 0.85) * 100;
-		return 1 - 1 / (1 + powf(2, -t));
-	}
-}
-
-int
-get_scale_factor()
-{
-	int window_width, window_height;
-	int buffer_width, buffer_height;
-	glfwGetWindowSize(g->window, &window_width, &window_height);
-	glfwGetFramebufferSize(g->window, &buffer_width, &buffer_height);
-	int result = buffer_width / window_width;
-	result = MAX(1, result);
-	result = MIN(2, result);
-	return result;
-}
-
-void
-get_sight_vector(float rx, float ry, float *vx, float *vy, float *vz)
-{
-	float m = cosf(ry);
-	*vx = cosf(rx - RADIANS(90)) * m;
-	*vy = sinf(ry);
-	*vz = sinf(rx - RADIANS(90)) * m;
-}
 
 void
 get_motion_vector(
@@ -252,219 +72,26 @@ get_motion_vector(
 	}
 }
 
-GLuint
-gen_crosshair_buffer()
-{
-	int x = g->width / 2;
-	int y = g->height / 2;
-	int p = 10 * g->scale;
-	float data[] = {x, y - p, x, y + p, x - p, y, x + p, y};
-	return gen_buffer(sizeof(data), data);
-}
-
-GLuint
-gen_wireframe_buffer(float x, float y, float z, float n)
-{
-	float data[72];
-	make_cube_wireframe(data, x, y, z, n);
-	return gen_buffer(sizeof(data), data);
-}
-
-GLuint
-gen_sky_buffer()
-{
-	float data[12288];
-	make_sphere(data, 1, 3);
-	return gen_buffer(sizeof(data), data);
-}
-
-GLuint
-gen_cube_buffer(float x, float y, float z, float n, int w)
-{
-	GLfloat *data = malloc_faces(10, 6);
-	float ao[6][4] = {0};
-	float light[6][4] = {{0.5, 0.5, 0.5, 0.5}, {0.5, 0.5, 0.5, 0.5},
-						 {0.5, 0.5, 0.5, 0.5}, {0.5, 0.5, 0.5, 0.5},
-						 {0.5, 0.5, 0.5, 0.5}, {0.5, 0.5, 0.5, 0.5}};
-	make_cube(data, ao, light, 1, 1, 1, 1, 1, 1, x, y, z, n, w);
-	return gen_faces(10, 6, data);
-}
-
-GLuint
-gen_plant_buffer(float x, float y, float z, float n, int w)
-{
-	GLfloat *data = malloc_faces(10, 4);
-	float ao = 0;
-	float light = 1;
-	make_plant(data, ao, light, x, y, z, n, w, 45);
-	return gen_faces(10, 4, data);
-}
-
-GLuint
-gen_player_buffer(float x, float y, float z, float rx, float ry)
-{
-	GLfloat *data = malloc_faces(10, 6);
-	make_player(data, x, y, z, rx, ry);
-	return gen_faces(10, 6, data);
-}
-
-GLuint
-gen_text_buffer(float x, float y, float n, char *text)
-{
-	int length = strlen(text);
-	GLfloat *data = malloc_faces(4, length);
-	for (int i = 0; i < length; i++) {
-		make_character(data + i * 24, x, y, n / 2, n, text[i]);
-		x += n;
-	}
-	return gen_faces(4, length, data);
-}
-
 void
-draw_triangles_3d_ao(Attrib *attrib, GLuint buffer, int count)
+get_sight_vector(float rx, float ry, float *vx, float *vy, float *vz)
 {
-	glBindBuffer(GL_ARRAY_BUFFER, buffer);
-	glEnableVertexAttribArray(attrib->position);
-	glEnableVertexAttribArray(attrib->normal);
-	glEnableVertexAttribArray(attrib->uv);
-	glVertexAttribPointer(
-			attrib->position, 3, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 10, 0);
-	glVertexAttribPointer(
-			attrib->normal, 3, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 10,
-			(GLvoid *)(sizeof(GLfloat) * 3));
-	glVertexAttribPointer(
-			attrib->uv, 4, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 10,
-			(GLvoid *)(sizeof(GLfloat) * 6));
-	glDrawArrays(GL_TRIANGLES, 0, count);
-	glDisableVertexAttribArray(attrib->position);
-	glDisableVertexAttribArray(attrib->normal);
-	glDisableVertexAttribArray(attrib->uv);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	float m = cosf(ry);
+	*vx = cosf(rx - RADIANS(90)) * m;
+	*vy = sinf(ry);
+	*vz = sinf(rx - RADIANS(90)) * m;
 }
 
-void
-draw_triangles_3d_text(Attrib *attrib, GLuint buffer, int count)
+int
+get_scale_factor()
 {
-	glBindBuffer(GL_ARRAY_BUFFER, buffer);
-	glEnableVertexAttribArray(attrib->position);
-	glEnableVertexAttribArray(attrib->uv);
-	glVertexAttribPointer(
-			attrib->position, 3, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 5, 0);
-	glVertexAttribPointer(
-			attrib->uv, 2, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 5,
-			(GLvoid *)(sizeof(GLfloat) * 3));
-	glDrawArrays(GL_TRIANGLES, 0, count);
-	glDisableVertexAttribArray(attrib->position);
-	glDisableVertexAttribArray(attrib->uv);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-}
-
-void
-draw_triangles_3d(Attrib *attrib, GLuint buffer, int count)
-{
-	glBindBuffer(GL_ARRAY_BUFFER, buffer);
-	glEnableVertexAttribArray(attrib->position);
-	glEnableVertexAttribArray(attrib->normal);
-	glEnableVertexAttribArray(attrib->uv);
-	glVertexAttribPointer(
-			attrib->position, 3, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 8, 0);
-	glVertexAttribPointer(
-			attrib->normal, 3, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 8,
-			(GLvoid *)(sizeof(GLfloat) * 3));
-	glVertexAttribPointer(
-			attrib->uv, 2, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 8,
-			(GLvoid *)(sizeof(GLfloat) * 6));
-	glDrawArrays(GL_TRIANGLES, 0, count);
-	glDisableVertexAttribArray(attrib->position);
-	glDisableVertexAttribArray(attrib->normal);
-	glDisableVertexAttribArray(attrib->uv);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-}
-
-void
-draw_triangles_2d(Attrib *attrib, GLuint buffer, int count)
-{
-	glBindBuffer(GL_ARRAY_BUFFER, buffer);
-	glEnableVertexAttribArray(attrib->position);
-	glEnableVertexAttribArray(attrib->uv);
-	glVertexAttribPointer(
-			attrib->position, 2, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 4, 0);
-	glVertexAttribPointer(
-			attrib->uv, 2, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 4,
-			(GLvoid *)(sizeof(GLfloat) * 2));
-	glDrawArrays(GL_TRIANGLES, 0, count);
-	glDisableVertexAttribArray(attrib->position);
-	glDisableVertexAttribArray(attrib->uv);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-}
-
-void
-draw_lines(Attrib *attrib, GLuint buffer, int components, int count)
-{
-	glBindBuffer(GL_ARRAY_BUFFER, buffer);
-	glEnableVertexAttribArray(attrib->position);
-	glVertexAttribPointer(
-			attrib->position, components, GL_FLOAT, GL_FALSE, 0, 0);
-	glDrawArrays(GL_LINES, 0, count);
-	glDisableVertexAttribArray(attrib->position);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-}
-
-void
-draw_chunk(Attrib *attrib, Chunk *chunk)
-{
-	draw_triangles_3d_ao(attrib, chunk->buffer, chunk->faces * 6);
-}
-
-void
-draw_item(Attrib *attrib, GLuint buffer, int count)
-{
-	draw_triangles_3d_ao(attrib, buffer, count);
-}
-
-void
-draw_text(Attrib *attrib, GLuint buffer, int length)
-{
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	draw_triangles_2d(attrib, buffer, length * 6);
-	glDisable(GL_BLEND);
-}
-
-void
-draw_signs(Attrib *attrib, Chunk *chunk)
-{
-	glEnable(GL_POLYGON_OFFSET_FILL);
-	glPolygonOffset(-8, -1024);
-	draw_triangles_3d_text(attrib, chunk->sign_buffer, chunk->sign_faces * 6);
-	glDisable(GL_POLYGON_OFFSET_FILL);
-}
-
-void
-draw_sign(Attrib *attrib, GLuint buffer, int length)
-{
-	glEnable(GL_POLYGON_OFFSET_FILL);
-	glPolygonOffset(-8, -1024);
-	draw_triangles_3d_text(attrib, buffer, length * 6);
-	glDisable(GL_POLYGON_OFFSET_FILL);
-}
-
-void
-draw_cube(Attrib *attrib, GLuint buffer)
-{
-	draw_item(attrib, buffer, 36);
-}
-
-void
-draw_plant(Attrib *attrib, GLuint buffer)
-{
-	draw_item(attrib, buffer, 24);
-}
-
-void
-draw_player(Attrib *attrib, Player *player)
-{
-	draw_cube(attrib, player->buffer);
+	int window_width, window_height;
+	int buffer_width, buffer_height;
+	glfwGetWindowSize(g->window, &window_width, &window_height);
+	glfwGetFramebufferSize(g->window, &buffer_width, &buffer_height);
+	int result = buffer_width / window_width;
+	result = MAX(1, result);
+	result = MIN(2, result);
+	return result;
 }
 
 Player *
@@ -1778,7 +1405,7 @@ render_chunks(Attrib *attrib, Player *player)
 	ensure_chunks(player);
 	int p = chunked(s->x);
 	int q = chunked(s->z);
-	float light = get_daylight();
+	float light = get_daylight(g->day_length);
 	float matrix[16];
 	set_matrix_3d(
 			matrix, g->width, g->height, s->x, s->y, s->z, s->rx, s->ry, g->fov,
@@ -1793,7 +1420,7 @@ render_chunks(Attrib *attrib, Player *player)
 	glUniform1f(attrib->extra2, light);
 	glUniform1f(attrib->extra3, g->render_radius * CHUNK_SIZE);
 	glUniform1i(attrib->extra4, g->ortho);
-	glUniform1f(attrib->timer, time_of_day());
+	glUniform1f(attrib->timer, time_of_day(g->day_length));
 	for (int i = 0; i < g->chunk_count; i++) {
 		Chunk *chunk = g->chunks + i;
 		if (chunk_distance(chunk, p, q) > g->render_radius) {
@@ -1879,7 +1506,7 @@ render_players(Attrib *attrib, Player *player)
 	glUniformMatrix4fv(attrib->matrix, 1, GL_FALSE, matrix);
 	glUniform3f(attrib->camera, s->x, s->y, s->z);
 	glUniform1i(attrib->sampler, 0);
-	glUniform1f(attrib->timer, time_of_day());
+	glUniform1f(attrib->timer, time_of_day(g->day_length));
 	for (int i = 0; i < g->player_count; i++) {
 		Player *other = g->players + i;
 		if (other != player) {
@@ -1899,7 +1526,7 @@ render_sky(Attrib *attrib, Player *player, GLuint buffer)
 	glUseProgram(attrib->program);
 	glUniformMatrix4fv(attrib->matrix, 1, GL_FALSE, matrix);
 	glUniform1i(attrib->sampler, 2);
-	glUniform1f(attrib->timer, time_of_day());
+	glUniform1f(attrib->timer, time_of_day(g->day_length));
 	draw_triangles_3d(attrib, buffer, 512 * 3);
 }
 
@@ -1934,7 +1561,7 @@ render_crosshairs(Attrib *attrib)
 	glLineWidth(4 * g->scale);
 	glEnable(GL_COLOR_LOGIC_OP);
 	glUniformMatrix4fv(attrib->matrix, 1, GL_FALSE, matrix);
-	GLuint crosshair_buffer = gen_crosshair_buffer();
+	GLuint crosshair_buffer = gen_crosshair_buffer(g->width, g->height, g->scale);
 	draw_lines(attrib, crosshair_buffer, 2, 4);
 	del_buffer(crosshair_buffer);
 	glDisable(GL_COLOR_LOGIC_OP);
@@ -1949,7 +1576,7 @@ render_item(Attrib *attrib)
 	glUniformMatrix4fv(attrib->matrix, 1, GL_FALSE, matrix);
 	glUniform3f(attrib->camera, 0, 0, 5);
 	glUniform1i(attrib->sampler, 0);
-	glUniform1f(attrib->timer, time_of_day());
+	glUniform1f(attrib->timer, time_of_day(g->day_length));
 	int w = items[g->item_index];
 	if (is_plant(w)) {
 		GLuint buffer = gen_plant_buffer(0, 0, 0, 0.5, w);
@@ -3123,7 +2750,7 @@ main(int argc, char **argv)
 			float tx = ts / 2;
 			float ty = g->height - ts;
 			if (SHOW_INFO_TEXT) {
-				int hour = time_of_day() * 24;
+				int hour = time_of_day(g->day_length) * 24;
 				char am_pm = hour < 12 ? 'a' : 'p';
 				hour = hour % 12;
 				hour = hour ? hour : 12;
